@@ -1,12 +1,11 @@
 from flask import Flask, render_template, request, redirect, session, flash
-import sqlite3, numpy as np, pandas as pd, yfinance as yf
+import os, sqlite3, numpy as np, pandas as pd, yfinance as yf
 import joblib, io, base64
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from werkzeug.security import generate_password_hash, check_password_hash
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import load_model
 
 app = Flask(__name__)
 app.secret_key = "aska_secret_key"
@@ -50,9 +49,27 @@ def init_db():
 init_db()
 
 # ================= MODELS =================
-lstm_model = load_model("models/lstm_model.h5")
-rf_model = joblib.load("models/rf.joblib")
-meta_model = joblib.load("models/meta.joblib")
+LSTM_MODEL = None
+RF_MODEL = None
+META_MODEL = None
+
+models_path = os.path.join(os.getcwd(), "models")
+if os.path.isdir(models_path):
+    try:
+        from tensorflow.keras.models import load_model
+        LSTM_MODEL = load_model(os.path.join(models_path, "lstm_model.h5"))
+    except Exception:
+        LSTM_MODEL = None
+
+    try:
+        RF_MODEL = joblib.load(os.path.join(models_path, "rf.joblib"))
+    except Exception:
+        RF_MODEL = None
+
+    try:
+        META_MODEL = joblib.load(os.path.join(models_path, "meta.joblib"))
+    except Exception:
+        META_MODEL = None
 
 # ================= FEATURES =================
 def compute_features(df):
@@ -116,10 +133,18 @@ def hybrid_predict(df):
 
     seq = vals[-TIME_STEPS:].reshape(1, TIME_STEPS, -1)
 
-    p_lstm = float(lstm_model.predict(seq)[0][0])
-    p_rf = float(rf_model.predict_proba(seq.reshape(1, -1))[0][1])
+    if LSTM_MODEL is not None and RF_MODEL is not None:
+        p_lstm = float(LSTM_MODEL.predict(seq)[0][0])
+        p_rf = float(RF_MODEL.predict_proba(seq.reshape(1, -1))[0][1])
+        final = (p_lstm + p_rf) / 2
+    elif RF_MODEL is not None:
+        final = float(RF_MODEL.predict_proba(seq.reshape(1, -1))[0][1])
+    else:
+        # Fallback heuristic if models are unavailable
+        recent = df["Close"].pct_change().tail(5)
+        trend = float(recent.mean()) if not recent.isna().all() else 0.0
+        final = 0.5 + np.tanh(trend * 15)
 
-    final = (p_lstm + p_rf) / 2
     final = final + np.random.uniform(-0.15, 0.15)
     final = max(0.05, min(0.95, final))
 
