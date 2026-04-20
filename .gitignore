@@ -1,0 +1,8 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+users.db
+training_data_all.csv
+*.log
+.env
